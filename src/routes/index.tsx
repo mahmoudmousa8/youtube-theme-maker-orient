@@ -89,6 +89,207 @@ async function downloadDataUrl(dataUrl: string, filename: string) {
   a.remove();
 }
 
+const loadImage = (src: string): Promise<HTMLImageElement> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to load image."));
+    img.src = src;
+  });
+};
+
+const drawThumbnail = async (
+  bgBase64: string,
+  faceBase64: string,
+  title: string,
+  style: string,
+  companyLogoBase64?: string,
+  sheikhLogoBase64?: string,
+  sheikhName?: string,
+  paletteIndex?: number,
+  layoutIndex?: number,
+): Promise<string> => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1280;
+  canvas.height = 720;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not get 2D context");
+
+  // 1. Draw Background
+  const bgImg = await loadImage(bgBase64);
+  ctx.drawImage(bgImg, 0, 0, 1280, 720);
+
+  // 2. Define Palettes and Layout
+  const GENERAL_PALETTES = [
+    { name: "gold on deep black", main: "#FFC93C", accent: "#E63946", stroke: "#000000" },
+    { name: "crimson red on charcoal", main: "#FF2E2E", accent: "#FFFFFF", stroke: "#000000" },
+    { name: "cyan electric on navy", main: "#00E5FF", accent: "#FF3D8B", stroke: "#0B192C" },
+    { name: "emerald on forest black", main: "#00E676", accent: "#FFD54F", stroke: "#000000" },
+    { name: "royal purple on black", main: "#7B2FF7", accent: "#FF2EC4", stroke: "#000000" },
+    { name: "orange fire on dark", main: "#FF6B00", accent: "#FFD400", stroke: "#000000" },
+    { name: "ice white on blood red", main: "#FFFFFF", accent: "#B00020", stroke: "#000000" },
+    { name: "turquoise on obsidian", main: "#1DE9B6", accent: "#FF7A59", stroke: "#000000" },
+    { name: "hot pink on black", main: "#FF1F8F", accent: "#22D3EE", stroke: "#000000" },
+    { name: "silver + gold luxury", main: "#FFFFFF", accent: "#D4AF37", stroke: "#000000" },
+  ];
+
+  const ISLAMIC_PALETTES = [
+    { name: "antique gold on midnight navy", main: "#D4AF37", accent: "#F5E6C8", stroke: "#000000" },
+    { name: "warm gold on charcoal black", main: "#E0B84A", accent: "#F2ECD8", stroke: "#000000" },
+    { name: "cream white on deep emerald", main: "#F2ECD8", accent: "#C9A24B", stroke: "#000000" },
+    { name: "sepia gold on dark brown", main: "#C9A24B", accent: "#EFE6D2", stroke: "#1E1206" },
+    { name: "pure white on forest green", main: "#FFFFFF", accent: "#C9A24B", stroke: "#000000" },
+    { name: "gold on obsidian black", main: "#B8860B", accent: "#EFE6D2", stroke: "#000000" },
+  ];
+
+  const isIslamic = style === "islamic";
+  const paletteList = isIslamic ? ISLAMIC_PALETTES : GENERAL_PALETTES;
+  const pIdx =
+    typeof paletteIndex === "number"
+      ? ((paletteIndex % paletteList.length) + paletteList.length) % paletteList.length
+      : 0;
+  const palette = paletteList[pIdx];
+
+  const lIdx = typeof layoutIndex === "number" ? layoutIndex % 2 : 0; // 0 = right, 1 = left
+
+  // 3. Draw Subject Photo with a faded edge
+  if (faceBase64) {
+    const faceImg = await loadImage(faceBase64);
+
+    const faceHeight = 720;
+    const faceWidth = (faceImg.width / faceImg.height) * faceHeight;
+
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = faceWidth;
+    tempCanvas.height = faceHeight;
+    const tempCtx = tempCanvas.getContext("2d")!;
+    tempCtx.drawImage(faceImg, 0, 0, faceWidth, faceHeight);
+
+    tempCtx.globalCompositeOperation = "destination-in";
+    const grad = tempCtx.createLinearGradient(0, 0, faceWidth, 0);
+
+    if (lIdx === 0) {
+      grad.addColorStop(0, "rgba(0,0,0,0)");
+      grad.addColorStop(0.35, "rgba(0,0,0,1)");
+      grad.addColorStop(1, "rgba(0,0,0,1)");
+    } else {
+      grad.addColorStop(0, "rgba(0,0,0,1)");
+      grad.addColorStop(0.65, "rgba(0,0,0,1)");
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+    }
+    tempCtx.fillStyle = grad;
+    tempCtx.fillRect(0, 0, faceWidth, faceHeight);
+
+    if (lIdx === 0) {
+      const x = 1280 - faceWidth;
+      ctx.shadowColor = palette.accent;
+      ctx.shadowBlur = 40;
+      ctx.drawImage(tempCanvas, x, 0);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.shadowColor = palette.accent;
+      ctx.shadowBlur = 40;
+      ctx.drawImage(tempCanvas, 0, 0);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // 4. Draw Logos
+  if (companyLogoBase64) {
+    const logoImg = await loadImage(companyLogoBase64);
+    ctx.drawImage(logoImg, 1280 - 150 - 40, 40, 150, 80);
+  }
+  if (sheikhLogoBase64) {
+    const logoImg = await loadImage(sheikhLogoBase64);
+    ctx.drawImage(logoImg, 40, 40, 150, 80);
+  }
+
+  // 5. Draw Sheikh Name Pill
+  if (sheikhName) {
+    ctx.font = '700 24px "Cairo"';
+    const textWidth = ctx.measureText(sheikhName).width;
+    const paddingX = 20;
+    const paddingY = 10;
+    const pillWidth = textWidth + paddingX * 2;
+    const pillHeight = 24 + paddingY * 2;
+
+    const x = lIdx === 0 ? 40 : 1280 - pillWidth - 40;
+    const y = 720 - pillHeight - 40;
+
+    ctx.fillStyle = "rgba(10, 10, 10, 0.85)";
+    ctx.strokeStyle = palette.main;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, pillWidth, pillHeight, 15);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText(sheikhName, x + pillWidth / 2, y + pillHeight / 2);
+  }
+
+  // 6. Draw Arabic Title Text
+  const words = title.split(" ");
+  const lines: string[][] = [[]];
+  let currentLineIdx = 0;
+  ctx.font = '900 80px "Cairo"';
+
+  words.forEach((word) => {
+    const lineText = [...lines[currentLineIdx], word].join(" ");
+    const width = ctx.measureText(lineText).width;
+    if (width > 600 && lines[currentLineIdx].length > 0) {
+      currentLineIdx++;
+      lines[currentLineIdx] = [word];
+    } else {
+      lines[currentLineIdx].push(word);
+    }
+  });
+
+  const textX = lIdx === 0 ? 60 : 1280 - 60;
+  let textY = 280;
+  const lineHeight = 110;
+
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = lIdx === 0 ? "left" : "right";
+
+  lines.forEach((lineWords, lineIdx) => {
+    const y = textY + lineIdx * lineHeight;
+    const fullLineText = lineWords.join(" ");
+
+    ctx.shadowColor = "rgba(0, 0, 0, 0.9)";
+    ctx.shadowBlur = 15;
+    ctx.shadowOffsetX = 5;
+    ctx.shadowOffsetY = 5;
+
+    const grad = ctx.createLinearGradient(
+      textX,
+      0,
+      textX + (lIdx === 0 ? 500 : -500),
+      0,
+    );
+    grad.addColorStop(0, palette.main);
+    grad.addColorStop(1, palette.accent);
+    ctx.fillStyle = grad;
+
+    ctx.strokeStyle = palette.stroke;
+    ctx.lineWidth = 14;
+    ctx.lineJoin = "round";
+
+    ctx.strokeText(fullLineText, textX, y);
+    ctx.fillText(fullLineText, textX, y);
+
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  });
+
+  return canvas.toDataURL("image/png");
+};
+
+
 function Index() {
   const [titlesText, setTitlesText] = useState("");
   const [style, setStyle] = useState("islamic");
@@ -163,14 +364,8 @@ function Index() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageBase64,
           title: job.title,
           style,
-          companyLogoBase64: companyLogo || undefined,
-          sheikhLogoBase64: sheikhLogo || undefined,
-          sheikhName: sheikhName.trim() || undefined,
-          paletteIndex: unified?.paletteIndex,
-          layoutIndex: unified?.layoutIndex,
         }),
       });
 
@@ -178,7 +373,20 @@ function Index() {
       if (!res.ok || !data.image) {
         return { ...job, status: "error", error: data.error || "فشل التوليد" };
       }
-      return { ...job, status: "done", image: data.image };
+
+      const finalImage = await drawThumbnail(
+        data.image,
+        imageBase64,
+        job.title,
+        style,
+        companyLogo || undefined,
+        sheikhLogo || undefined,
+        sheikhName.trim() || undefined,
+        unified?.paletteIndex,
+        unified?.layoutIndex,
+      );
+
+      return { ...job, status: "done", image: finalImage };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "خطأ غير متوقع";
       return { ...job, status: "error", error: msg };
