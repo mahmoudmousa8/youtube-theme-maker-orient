@@ -1,0 +1,6 @@
+# AI Thumbnail Generator
+
+> Generate professional Arabic YouTube thumbnails with AI. Upload a portrait, enter a video title, pick a style, and download a cinematic 16:9 PNG.
+
+## Pages
+- [Home](/): Upload, title, style, generate, and download thumbnail.
