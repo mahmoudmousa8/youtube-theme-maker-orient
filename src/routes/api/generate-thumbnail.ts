@@ -130,7 +130,25 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
                 }
               } else {
                 const errText = await response.text();
-                lastError += `[AgentRouter failed]: ${errText} | `;
+                try {
+                  const modelsResp = await fetch(`${agentrouterBase}/models`, {
+                    headers: {
+                      "Authorization": `Bearer ${agentrouterKey}`,
+                      "User-Agent": "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
+                      "Originator": "codex_cli_rs",
+                      "Version": "0.101.0"
+                    }
+                  });
+                  if (modelsResp.ok) {
+                    const modelsJson = await modelsResp.json();
+                    const modelNames = modelsJson.data?.map((m: any) => m.id).join(", ");
+                    lastError += `[AgentRouter failed]: ${errText}. Available models: [${modelNames}] | `;
+                  } else {
+                    lastError += `[AgentRouter failed]: ${errText}. Failed to list models | `;
+                  }
+                } catch (me) {
+                  lastError += `[AgentRouter failed]: ${errText}. Error listing models: ${me} | `;
+                }
               }
             } catch (e) {
               const errMsg = e instanceof Error ? e.message : String(e);
