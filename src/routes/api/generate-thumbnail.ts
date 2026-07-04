@@ -26,30 +26,83 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
           const body = (await request.json()) as Body;
           const { style, title } = body;
 
+          const openrouterKey = process.env.OPENROUTER_API_KEY;
           const apiKey = process.env.GEMINI_API_KEY || "AIzaSyBVvVNLmt9I8xDiRqrZinnMktPcfXDJDS0";
-          if (!apiKey) {
-            return new Response(
-              JSON.stringify({ error: "Missing GEMINI_API_KEY" }),
-              { status: 500, headers: { "Content-Type": "application/json" } }
-            );
-          }
 
           const basePrompt = BACKGROUND_PROMPTS[style] ?? BACKGROUND_PROMPTS.islamic;
           // Add some customization based on the title keywords to make each background unique
           const prompt = `${basePrompt} Keywords related to background theme: ${title.slice(0, 50)}.`;
 
-          // List of Gemini-native image generation models to try in sequence
-          const models = [
-            "gemini-3-pro-image-preview",
-            "gemini-3.1-flash-image",
-            "gemini-3-pro-image",
-            "gemini-2.5-flash-image"
-          ];
-
           let base64Image = "";
           let lastError = "";
 
-          for (const model of models) {
+          // 1. Try OpenRouter if key is provided
+          if (openrouterKey) {
+            try {
+              console.log("[generate-thumbnail] Trying OpenRouter with google/gemini-3.1-flash-lite-image...");
+              const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${openrouterKey}`,
+                  "HTTP-Referer": "https://thumbnail.orientdigitals.com",
+                  "X-Title": "YouTube Thumbnail Generator"
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-3.1-flash-lite-image",
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        {
+                          type: "text",
+                          text: prompt
+                        }
+                      ]
+                    }
+                  ]
+                })
+              });
+
+              if (response.ok) {
+                const resJson = await response.json();
+                const imgUrl = resJson.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+                if (imgUrl) {
+                  if (imgUrl.startsWith("data:")) {
+                    const parts = imgUrl.split(",");
+                    if (parts.length > 1) {
+                      base64Image = parts[1];
+                    }
+                  } else {
+                    base64Image = imgUrl;
+                  }
+                } else {
+                  lastError += `[OpenRouter]: Image URL not found in response. JSON: ${JSON.stringify(resJson)} | `;
+                }
+              } else {
+                const errText = await response.text();
+                lastError += `[OpenRouter failed]: ${errText} | `;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              lastError += `[OpenRouter error]: ${errMsg} | `;
+            }
+          }
+
+          // 2. Try Gemini Native API if OpenRouter didn't run or failed
+          if (!base64Image) {
+            if (!apiKey || apiKey === "AIzaSyBVvVNLmt9I8xDiRqrZinnMktPcfXDJDS0") {
+              lastError += "Gemini API Key is missing or default leaked key | ";
+            } else {
+              // List of Gemini-native image generation models to try in sequence
+              const models = [
+                "gemini-3-pro-image-preview",
+                "gemini-3.1-flash-image",
+                "gemini-3-pro-image",
+                "gemini-2.5-flash-image"
+              ];
+
+              for (const model of models) {
             try {
               const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
               const payload = {
@@ -131,6 +184,8 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
             } catch (e) {
               const errMsg = e instanceof Error ? e.message : String(e);
               lastError += `[imagen-3.0 error]: ${errMsg}`;
+            }
+          }
             }
           }
 
