@@ -134,6 +134,32 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
             }
           }
 
+          // If all native Gemini image models and legacy Imagen models failed, try Pollinations.ai as a FREE fallback!
+          if (!base64Image) {
+            try {
+              const encodedPrompt = encodeURIComponent(prompt);
+              const pollUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=576&nologo=true&private=true&enhance=false`;
+
+              const pollResponse = await fetch(pollUrl, {
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                }
+              });
+
+              if (pollResponse.ok) {
+                const arrayBuffer = await pollResponse.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+                base64Image = buffer.toString("base64");
+              } else {
+                const errText = await pollResponse.text();
+                lastError += ` | [Pollinations]: ${errText}`;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              lastError += ` | [Pollinations error]: ${errMsg}`;
+            }
+          }
+
           if (!base64Image) {
             return new Response(
               JSON.stringify({ error: `All image generation models failed. Errors: ${lastError}` }),
