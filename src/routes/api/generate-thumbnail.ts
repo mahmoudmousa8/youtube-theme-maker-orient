@@ -1,9 +1,43 @@
 import { createFileRoute } from "@tanstack/react-router";
+import fs from "node:fs";
+import path from "node:path";
 
 type Body = {
   style: string;
   title: string; // Used to customize background elements
 };
+
+// Helper to load .env file dynamically on shared hosting environments
+function loadEnv() {
+  try {
+    const envPaths = [
+      path.resolve(process.cwd(), ".env"),
+      path.resolve(process.cwd(), "public_html", ".env"),
+      path.resolve("/home/u591072927/domains/thumbnail.orientdigitals.com/public_html", ".env"),
+      path.resolve("/home/u591072927/domains/thumbnail.orientdigitals.com/nodejs", ".env")
+    ];
+
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith("#")) {
+            const [key, ...valueParts] = trimmed.split("=");
+            if (key) {
+              const val = valueParts.join("=").trim().replace(/^['"]|['"]$/g, "");
+              process.env[key.trim()] = val;
+            }
+          }
+        }
+        break; // Stop after loading the first found .env file
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load .env file:", e);
+  }
+}
+
 
 const BACKGROUND_PROMPTS: Record<string, string> = {
   islamic:
@@ -23,9 +57,13 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
     handlers: {
       POST: async ({ request }) => {
         try {
+          loadEnv(); // Load .env file dynamically on every request
+
           const body = (await request.json()) as Body;
           const { style, title } = body;
 
+          const agentrouterKey = process.env.AGENT_ROUTER_API_KEY;
+          const agentrouterBase = process.env.AGENT_ROUTER_BASE_URL || "https://agentrouter.org/v1";
           const openrouterKey = process.env.OPENROUTER_API_KEY;
           const apiKey = process.env.GEMINI_API_KEY || "AIzaSyBVvVNLmt9I8xDiRqrZinnMktPcfXDJDS0";
 
@@ -36,8 +74,69 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
           let base64Image = "";
           let lastError = "";
 
-          // 1. Try OpenRouter if key is provided
-          if (openrouterKey) {
+          // 1. Try Agent Router if key is provided
+          if (agentrouterKey && !base64Image) {
+            try {
+              console.log("[generate-thumbnail] Trying Agent Router with google/gemini-3.1-flash-lite-image...");
+              const response = await fetch(`${agentrouterBase}/chat/completions`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${agentrouterKey}`
+                },
+                body: JSON.stringify({
+                  model: "google/gemini-3.1-flash-lite-image",
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        {
+                          type: "text",
+                          text: prompt
+                        }
+                      ]
+                    }
+                  ]
+                })
+              });
+
+              if (response.ok) {
+                const resJson = await response.json();
+                const imgUrl = resJson.choices?.[0]?.message?.images?.[0]?.image_url?.url || 
+                               resJson.choices?.[0]?.message?.content;
+                
+                if (imgUrl) {
+                  if (imgUrl.startsWith("data:")) {
+                    const parts = imgUrl.split(",");
+                    if (parts.length > 1) {
+                      base64Image = parts[1];
+                    }
+                  } else if (imgUrl.startsWith("http")) {
+                    const imgResp = await fetch(imgUrl);
+                    if (imgResp.ok) {
+                      const arrayBuffer = await imgResp.arrayBuffer();
+                      base64Image = Buffer.from(arrayBuffer).toString("base64");
+                    } else {
+                      lastError += `[AgentRouter]: Failed to fetch image URL: ${imgUrl} | `;
+                    }
+                  } else {
+                    base64Image = imgUrl;
+                  }
+                } else {
+                  lastError += `[AgentRouter]: Image URL not found in response. JSON: ${JSON.stringify(resJson)} | `;
+                }
+              } else {
+                const errText = await response.text();
+                lastError += `[AgentRouter failed]: ${errText} | `;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              lastError += `[AgentRouter error]: ${errMsg} | `;
+            }
+          }
+
+          // 2. Try OpenRouter if key is provided and Agent Router didn't run or failed
+          if (openrouterKey && !base64Image) {
             try {
               console.log("[generate-thumbnail] Trying OpenRouter with google/gemini-3.1-flash-lite-image...");
               const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
