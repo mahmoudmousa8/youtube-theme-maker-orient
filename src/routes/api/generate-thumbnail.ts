@@ -38,47 +38,111 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
           // Add some customization based on the title keywords to make each background unique
           const prompt = `${basePrompt} Keywords related to background theme: ${title.slice(0, 50)}.`;
 
-          const upstream = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                instances: [{ prompt }],
-                parameters: {
-                  sampleCount: 1,
-                  aspectRatio: "16:9",
-                  outputMimeType: "image/png",
-                },
-              }),
-            }
-          );
+          // List of Gemini-native image generation models to try in sequence
+          const models = [
+            "gemini-3-pro-image-preview",
+            "gemini-3.1-flash-image",
+            "gemini-3-pro-image",
+            "gemini-2.5-flash-image"
+          ];
 
-          if (!upstream.ok) {
-            const errorText = await upstream.text();
+          let base64Image = "";
+          let lastError = "";
+
+          for (const model of models) {
+            try {
+              const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+              const payload = {
+                contents: [
+                  {
+                    role: "user",
+                    parts: [
+                      {
+                        text: prompt
+                      }
+                    ]
+                  }
+                ],
+                generationConfig: {
+                  responseModalities: ["IMAGE"],
+                  imageConfig: {
+                    aspectRatio: "16:9",
+                    imageSize: "1K"
+                  }
+                }
+              };
+
+              const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+              });
+
+              if (response.ok) {
+                const resJson = await response.json();
+                const b64 = resJson.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                if (b64) {
+                  base64Image = b64;
+                  break; // Found a working model, stop checking
+                }
+              } else {
+                const errText = await response.text();
+                lastError += `[${model}]: ${errText} | `;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              lastError += `[${model} error]: ${errMsg} | `;
+            }
+          }
+
+          // If all native Gemini image models failed, try legacy imagen-3.0-generate-002 as a final fallback
+          if (!base64Image) {
+            try {
+              const response = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    instances: [{ prompt }],
+                    parameters: {
+                      sampleCount: 1,
+                      aspectRatio: "16:9",
+                      outputMimeType: "image/png",
+                    },
+                  }),
+                }
+              );
+
+              if (response.ok) {
+                const json = await response.json();
+                const b64 = json.predictions?.[0]?.bytesBase64Encoded;
+                if (b64) {
+                  base64Image = b64;
+                }
+              } else {
+                const errText = await response.text();
+                lastError += `[imagen-3.0]: ${errText}`;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              lastError += `[imagen-3.0 error]: ${errMsg}`;
+            }
+          }
+
+          if (!base64Image) {
             return new Response(
-              JSON.stringify({ error: `Google AI Studio error: ${errorText || upstream.status}` }),
+              JSON.stringify({ error: `All image generation models failed. Errors: ${lastError}` }),
               { status: 502, headers: { "Content-Type": "application/json" } }
             );
           }
 
-          const json = (await upstream.json()) as {
-            predictions?: Array<{ bytesBase64Encoded?: string }>;
-            error?: { message?: string };
-          };
-
-          const b64 = json.predictions?.[0]?.bytesBase64Encoded;
-          if (!b64) {
-            return new Response(
-              JSON.stringify({ error: json.error?.message || "Failed to generate background image." }),
-              { status: 500, headers: { "Content-Type": "application/json" } }
-            );
-          }
-
           return new Response(
-            JSON.stringify({ image: `data:image/png;base64,${b64}` }),
+            JSON.stringify({ image: `data:image/png;base64,${base64Image}` }),
             { status: 200, headers: { "Content-Type": "application/json" } }
           );
         } catch (err) {
