@@ -3,4 +3,8 @@ process.env.PORT = port.toString();
 
 console.log(`[YouTube Theme Launcher] Starting Nitro production server on port ${port}...`);
 
-import("./dist/server/index.mjs");
+import("./dist/server/index.mjs").catch((err) => {
+  console.error("Failed to start Nitro server:", err);
+  process.exit(1);
+});
+
