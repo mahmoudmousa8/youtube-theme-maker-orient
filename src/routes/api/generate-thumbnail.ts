@@ -1,6 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import fs from "node:fs";
 import path from "node:path";
+import dns from "node:dns";
+
+// Force Node.js to prefer IPv4 over IPv6 to bypass shared hosting IPv6 rate-limit and queue blocks on free APIs
+if (dns && typeof dns.setDefaultResultOrder === "function") {
+  dns.setDefaultResultOrder("ipv4first");
+}
+
 
 type Body = {
   style: string;
