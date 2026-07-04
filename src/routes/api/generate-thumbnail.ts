@@ -82,7 +82,10 @@ export const Route = createFileRoute("/api/generate-thumbnail")({
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "Authorization": `Bearer ${agentrouterKey}`
+                  "Authorization": `Bearer ${agentrouterKey}`,
+                  "User-Agent": "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464",
+                  "Originator": "codex_cli_rs",
+                  "Version": "0.101.0"
                 },
                 body: JSON.stringify({
                   model: "google/gemini-3.1-flash-lite-image",
